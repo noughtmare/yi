@@ -28,6 +28,7 @@ module Yi.Editor ( Editor(..), EditorM, MonadEditor(..)
                  , closeOtherE
                  , clrStatus
                  , commonNamePrefix
+                 , completionsA
                  , currentBuffer
                  , currentRegexA
                  , currentWindowA
@@ -147,7 +148,7 @@ import           Yi.Utils
 import           Yi.Window
 
 instance Binary Editor where
-  put (Editor bss bs supply ts dv _sl msh kr regex _dir _ev _cwa ) =
+  put (Editor bss bs supply ts dv _sl msh kr regex _dir _ev _cwa _compl) =
     let putNE (x :| xs) = put x >> put xs
     in putNE bss >> put bs >> put supply >> put ts
        >> put dv >> put msh >> put kr >> put regex
@@ -185,6 +186,7 @@ emptyEditor = Editor
   , pendingEvents = []
   , maxStatusHeight = 1
   , onCloseActions = M.empty
+  , completions  = ("", [])
   }
   where buf = newB 0 (MemBuffer "console") mempty
         win = (dummyWindow (bkey buf)) { wkey = WindowRef 1 , isMini = False }

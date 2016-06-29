@@ -37,7 +37,7 @@ import           Data.Monoid                    (Endo (appEndo), (<>))
 import qualified Data.Text                      as T (Text, cons, empty,
                                                       justifyLeft, length, pack,
                                                       singleton, snoc, take,
-                                                      unpack)
+                                                      unpack, drop)
 import           GHC.Conc                       (labelThread)
 import qualified Graphics.Vty                   as Vty (Attr, Cursor (Cursor, NoCursor),
                                                         Event (EvResize), Image,
@@ -63,6 +63,7 @@ import qualified Yi.UI.Common                   as Common
 import qualified Yi.UI.SimpleLayout             as SL
 import           Yi.Layout                      (HasNeighborWest)
 import           Yi.UI.TabBar                   (TabDescr (TabDescr), tabBarDescr)
+import           Yi.UI.Completion               (CompletionEntryDescr (CompletionEntryDescr), completionsDescr)
 import           Yi.UI.Utils                    (arrangeItems, attributesPictureAndSelB)
 import           Yi.UI.Vty.Conversions          (colorToAttr, fromVtyEvent)
 import           Yi.Window                      (Window (bufkey, isMini, wkey))
@@ -193,6 +194,11 @@ refresh fs e = do
         tabBarImage =
             renderTabBar tabbarRect (configStyle (configUI (fsConfig fs)))
                 (map (\(TabDescr t f) -> (t, f)) (toList (tabBarDescr e)))
+        completionImage = case cursorPos of
+            Vty.NoCursor -> Nothing
+            Vty.Cursor x y -> Just $ renderCompletion (x, y) (configStyle (configUI (fsConfig fs)))
+                (mapMapSnd (\(CompletionEntryDescr t f) -> (t, f)) (completionsDescr e))
+        mapMapSnd f (a,b) = (a, map f b)
         cmdImage = if null cmd
                    then Vty.emptyImage
                    else Vty.translate
@@ -208,7 +214,7 @@ refresh fs e = do
                   (_, Nothing) -> Vty.NoCursor
     logPutStrLn "refreshing screen."
     Vty.update (fsVty fs)
-        (Vty.picForLayers ([tabBarImage, cmdImage] ++ bigImages ++ miniImages))
+        (Vty.picForLayers (concat [[tabBarImage, cmdImage], maybeToList completionImage, bigImages, miniImages]))
         { Vty.picCursor = cursorPos }
 
 renderWindow :: UIConfig -> Editor -> SL.Rect -> HasNeighborWest -> (Window, Bool) -> Rendered
@@ -369,3 +375,16 @@ renderTabBar r uiStyle ts = (Vty.<|> padding) . Vty.horizCat $ fmap render ts
             `Vty.withStyle` Vty.underline
     padding = Vty.charFill (tabAttr False) ' ' (SL.sizeX r - width) 1
     width = sum . map ((+2) . T.length . fst) $ ts
+
+renderCompletion :: (Int, Int) -> UIStyle -> (T.Text, [(T.Text, Bool)]) -> Vty.Image
+renderCompletion (x,y) uiStyle (inputText, candidates) = 
+  Vty.translate (x - 1) (y + 1) (Vty.vertCat $ map render candidates)
+  where
+    render (text, isSelected) = Vty.text' (entryAttr isSelected) (entryTitle $ T.drop (T.length inputText) text)
+    entryTitle text = T.justifyLeft width ' ' (' ' `T.cons` text `T.snoc` ' ')
+    entryAttr b = baseAttr b $ completionsAttributes uiStyle
+    baseAttr True sty =
+      attributesToAttr (appEndo (completionInFocusStyle uiStyle) sty) Vty.defAttr
+    baseAttr False sty = 
+      attributesToAttr (appEndo (completionNotFocusedStyle uiStyle) sty) Vty.defAttr
+    width = (+ 2) . flip (-) (T.length inputText) . maximum . map (T.length . fst) $ candidates

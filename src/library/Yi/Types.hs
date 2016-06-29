@@ -354,6 +354,7 @@ data Editor = Editor
     -- ^ Processed events that didn't yield any action yet.
   , onCloseActions  :: !(M.Map BufferRef (EditorM ()))
     -- ^ Actions to be run when the buffer is closed; should be scrapped.
+  , completions     :: !(T.Text,[(T.Text, Bool)])
   } deriving Typeable
 
 

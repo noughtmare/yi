@@ -251,6 +251,7 @@ library
     Yi.TextCompletion
     Yi.Types
     Yi.UI.Common
+    Yi.UI.Completion
     Yi.UI.Batch
     Yi.UI.SimpleLayout
     Yi.UI.TabBar
