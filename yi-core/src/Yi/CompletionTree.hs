@@ -1,6 +1,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 {- |
 Module      :  Yi.CompletionTree
@@ -15,58 +16,55 @@ Intended to be imported qualified:
 
 >import qualified Yi.CompletionTree as CT
 -}
-module Yi.CompletionTree ( 
-  CompletionTree (CT), Completable (..),
-  fromCompletable, toCompletable, 
-  update, obvious, pretty
+module Yi.CompletionTree (
+  -- * CompletionTree type
+  CompletionTree (),
+  -- * Lists
+  fromList, toList,
+  -- * Modification
+  complete, update, updateOne,
+  -- * Debugging
+  pretty
   ) where
 
-import           Control.Arrow   (first) 
+import           Control.Arrow   (first)
 import           Data.Function   (on)
 import           Data.List       (partition, maximumBy, intercalate)
-import qualified Data.Map.Strict as Map
+import qualified Data.Map.Strict as M
 import           Data.Map.Strict (Map)
 import           Data.Maybe      (isJust, fromJust, listToMaybe, catMaybes)
-import           Data.Monoid     ((<>))
-import           Data.Text       (Text)
+import qualified Data.ListLike   as LL
+import           Data.ListLike   (ListLike)
 
--- For completable instances.
-import qualified Data.List       as L (isPrefixOf, inits, stripPrefix)
-import qualified Data.Text       as T (isPrefixOf, inits, stripPrefix)
+-- | A CompletionTree is a map of partial completions.
+newtype CompletionTree a = CompletionTree (Map a (CompletionTree a)) deriving (Monoid)
 
--- | A CompletionTree is a map of parital completions.
-newtype CompletionTree a = CT (Map a (CompletionTree a)) deriving (Monoid, Show)
+instance (Show a, ListLike a i) => Show (CompletionTree a) where
+  show ct = "fromList " ++ show (toList ct)
 
--- | All things that can be completed.
-class (Monoid a) => Completable a where
-  stripPrefix :: a -> a -> Maybe a
-  isPrefixOf  :: a -> a -> Bool
-  inits       :: a -> [a]
-
-instance Completable Text where
-  stripPrefix = T.stripPrefix
-  isPrefixOf  = T.isPrefixOf
-  inits       = T.inits
-
-instance Eq a => Completable [a] where
-  stripPrefix = L.stripPrefix
-  isPrefixOf  = L.isPrefixOf
-  inits       = L.inits
+stripPrefix :: (Eq item, ListLike full item) => full -> full -> Maybe full
+stripPrefix a b
+  | LL.null a = Just b
+  | LL.null b = Nothing
+  | LL.head a == LL.head b = stripPrefix (LL.tail a) (LL.tail b)
+  | otherwise = Nothing
 
 -- | This function converts a list of completable elements to a CompletionTree
 -- It finds elements that share a common prefix and groups them.
-fromCompletable :: (Ord a, Completable a, Show a) => [a] -> CompletionTree a
-fromCompletable [] = mempty
-fromCompletable (x:xs)
-  | x == mempty = CT (Map.singleton mempty mempty) <> fromCompletable xs
-  | otherwise = case maximumBy' (compare `on` childrenIn xs) (tail $ inits x) of
-      Nothing -> CT (Map.singleton x mempty) <> fromCompletable xs
-      Just parent -> case first (x:) $ partition (parent `isPrefixOf`) xs of
-        ([_],rest) -> CT (Map.singleton parent mempty) <> fromCompletable rest
-        (hasParent, rest) -> CT (Map.singleton parent . fromCompletable $
-           map (fromJust . stripPrefix parent) hasParent) <> fromCompletable rest
+--
+-- prop> fromList . toList = id
+fromList :: (Ord a, ListLike a i, Show a, Eq i) => [a] -> CompletionTree a
+fromList [] = mempty
+fromList (x:xs)
+  | x == mempty = (\(CompletionTree ct) -> CompletionTree (M.insert mempty mempty ct)) (fromList xs)
+  | otherwise = case maximumBy' (compare `on` childrenIn xs) (tail $ LL.inits x) of
+      Nothing -> (\(CompletionTree ct) -> CompletionTree (M.insert x mempty ct)) (fromList xs)
+      Just parent -> case first (x:) $ partition (parent `LL.isPrefixOf`) xs of
+        ([_],rest) -> (\(CompletionTree ct) -> CompletionTree $ M.insert parent mempty ct) $ fromList rest
+        (hasParent, rest) -> (\(CompletionTree ct) -> CompletionTree (M.insert parent (fromList $
+           map (fromJust . stripPrefix parent) hasParent) ct)) $ fromList rest
       -- A parent is the prefix and the children are the items with the parent as prefix
-      where childrenIn list parent = length $ filter (parent `isPrefixOf`) list
+      where childrenIn list parent = length $ filter (parent `LL.isPrefixOf`) list
 
 -- | The largest element of a non-empty structure with respect to the
 -- given comparison function, Nothing if there are multiple 'largest' elements.
@@ -82,31 +80,79 @@ maximumBy' cmp l | atleast 2 (== max') l = Nothing
                                | otherwise = atleast n cmp' xs
 
 -- | Complete as much as possible without guessing.
-obvious :: Completable a => CompletionTree a -> (a, CompletionTree a)
-obvious (CT ct) | Map.size ct == 1 = Map.elemAt 0 ct
-                | otherwise = (mempty,CT ct)
+--
+-- Examples:
+--
+-- >>> complete $ fromList ["put","putStrLn","putStr"]
+-- ("put", fromList ["","Str","StrLn"])
+--
+-- >>> complete $ fromList ["put","putStr","putStrLn","xxx"]
+-- ("", fromList ["put","putStr","putStrLn","xxx"])
+complete :: ListLike a i => CompletionTree a -> (a, CompletionTree a)
+complete (CompletionTree ct)
+  | M.size ct == 1 = M.elemAt 0 ct
+  | otherwise = (mempty,CompletionTree ct)
 
 -- | Update the CompletionTree with new information.
-update :: (Ord a, Completable a) => CompletionTree a -> a -> CompletionTree a
-update (CT ct) p
-  | mempty == p = CT ct
+--
+-- Examples:
+--
+-- >>> update (fromList ["put","putStr"]) "p"
+-- fromList ["ut","utStr"]
+--
+-- >>> update (fromList ["put","putStr"]) "put"
+-- fromList ["","Str"]
+--
+-- >>> update (fromList ["put","putStr"]) "putS"
+-- fromList ["tr"]
+update :: (Ord a, ListLike a i, Eq i) => CompletionTree a -> a -> CompletionTree a
+update (CompletionTree ct) p
+  -- p is empty:
+  | mempty == p = CompletionTree ct
+  -- p is a key in the map ct:
   | isJust one = fromJust one
+  -- a substring of p is a key in ct:
   | isJust remaining = uncurry update $ fromJust remaining
-  | otherwise = CT $ Map.mapKeys fromJust
-                   $ Map.filterWithKey (const . isJust)
-                   $ Map.mapKeys (stripPrefix p) ct
+  -- p is a substring of a key in ct:
+  | otherwise = CompletionTree $ M.mapKeys fromJust
+                               $ M.filterWithKey (const . isJust)
+                               $ M.mapKeys (stripPrefix p) ct
   where
-    one = Map.lookup p ct
-    remaining = listToMaybe . catMaybes $ map (\p' -> (,fromJust $ stripPrefix p' p) <$> Map.lookup p' ct) (inits p)
+    one = M.lookup p ct
+    remaining = listToMaybe . catMaybes $
+      map (\p' -> (,fromJust $ stripPrefix p' p) <$> M.lookup p' ct) (tail $ LL.inits p)
 
--- | Converts a CompletionTree to a list of completions
-toCompletable :: Completable a => CompletionTree a -> [a]
-toCompletable (CT ct)
-  | Map.null ct = [mempty]
-  | otherwise = concat $ Map.elems $ Map.mapWithKey (\k v -> map (k <>) $ toCompletable v) ct
+-- | Like 'update' but with only one item.
+updateOne :: (Ord a, ListLike a i, Eq i) => CompletionTree a -> i -> CompletionTree a
+updateOne (CompletionTree ct) p
+  -- (LL.singleton p) is a key in ct:
+  | isJust one = fromJust one
+  -- p is the head of a key in ct:
+  | otherwise = CompletionTree $ M.mapKeys fromJust
+                               $ M.filterWithKey (const . isJust)
+                               $ M.mapKeys (stripPrefixItem p) ct
+  where
+    one = M.lookup (LL.singleton p) ct
+    stripPrefixItem item full
+      | LL.null full = Nothing
+      | LL.head full == item = Just $ LL.tail full
+      | otherwise = Nothing
 
--- | For debugging purposes
+-- | Converts a CompletionTree to a list of completions.
+--
+-- prop> toList . fromList = id
+toList :: ListLike a i => CompletionTree a -> [a]
+toList (CompletionTree ct)
+  | M.null ct = [mempty]
+  | otherwise = concat $ M.elems $ M.mapWithKey (\k v -> map (k `LL.append`) $ toList v) ct
+
+-- | For debugging purposes.
+-- 
+-- Example:
+--
+-- >>> putStrLn $ pretty $ fromList ["put", "putStr", "putStrLn"]
+-- ["put"[""|"Str"[""|"Ln"]]]
 pretty :: Show a => CompletionTree a -> String
-pretty (CT ct)
-  | Map.null ct = ""
-  | otherwise = "[" ++ intercalate "|" (Map.elems (Map.mapWithKey (\k v -> shows k (pretty v)) ct)) ++ "]"
+pretty (CompletionTree ct)
+  | M.null ct = ""
+  | otherwise = "[" ++ intercalate "|" (M.elems (M.mapWithKey (\k v -> shows k (pretty v)) ct)) ++ "]"
