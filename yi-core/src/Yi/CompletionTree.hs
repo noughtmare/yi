@@ -48,13 +48,6 @@ completionTree f ct = (\completionTree' -> ct {_completionTree = completionTree'
 instance (Show a, ListLike a i) => Show (CompletionTree a) where
   show ct = "fromList " ++ show (toList ct)
 
-stripPrefix :: (Eq item, ListLike full item) => full -> full -> Maybe full
-stripPrefix a b
-  | LL.null a = Just b
-  | LL.null b = Nothing
-  | LL.head a == LL.head b = stripPrefix (LL.tail a) (LL.tail b)
-  | otherwise = Nothing
-
 -- | This function converts a list of completable elements to a CompletionTree
 -- It finds elements that share a common prefix and groups them.
 --
@@ -68,7 +61,7 @@ fromList (x:xs)
       Just parent -> case first (x:) $ partition (parent `LL.isPrefixOf`) xs of
         ([_],rest) -> over completionTree (M.insert parent mempty) $ fromList rest
         (hasParent, rest) -> over completionTree (M.insert parent (fromList $
-           map (fromJust . stripPrefix parent) hasParent)) $ fromList rest
+           map (fromJust . LL.stripPrefix parent) hasParent)) $ fromList rest
       -- A parent is the prefix and the children are the items with the parent as prefix
       where childrenIn list parent = length $ filter (parent `LL.isPrefixOf`) list
 
@@ -122,11 +115,11 @@ update (CompletionTree ct) p
   -- p is a substring of a key in ct:
   | otherwise = CompletionTree $ M.mapKeys fromJust
                                $ M.filterWithKey (const . isJust)
-                               $ M.mapKeys (stripPrefix p) ct
+                               $ M.mapKeys (LL.stripPrefix p) ct
   where
     one = M.lookup p ct
     remaining = listToMaybe . catMaybes $
-      map (\p' -> (,fromJust $ stripPrefix p' p) <$> M.lookup p' ct) (tail $ LL.inits p)
+      map (\p' -> (,fromJust $ LL.stripPrefix p' p) <$> M.lookup p' ct) (tail $ LL.inits p)
 
 -- | Like 'update' but with only one item.
 updateOne :: (Ord a, ListLike a i, Eq i) => CompletionTree a -> i -> CompletionTree a
@@ -136,13 +129,9 @@ updateOne (CompletionTree ct) p
   -- p is the head of a key in ct:
   | otherwise = CompletionTree $ M.mapKeys fromJust
                                $ M.filterWithKey (const . isJust)
-                               $ M.mapKeys (stripPrefixItem p) ct
+                               $ M.mapKeys (LL.stripPrefix $ LL.singleton p) ct
   where
     one = M.lookup (LL.singleton p) ct
-    stripPrefixItem item full
-      | LL.null full = Nothing
-      | LL.head full == item = Just $ LL.tail full
-      | otherwise = Nothing
 
 -- | Converts a CompletionTree to a list of completions.
 --
