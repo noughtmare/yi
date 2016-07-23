@@ -27,17 +27,23 @@ module Yi.CompletionTree (
   pretty
   ) where
 
-import           Control.Arrow   (first)
-import           Data.Function   (on)
-import           Data.List       (partition, maximumBy, intercalate)
-import qualified Data.Map.Strict as M
-import           Data.Map.Strict (Map)
-import           Data.Maybe      (isJust, fromJust, listToMaybe, catMaybes)
-import qualified Data.ListLike   as LL
-import           Data.ListLike   (ListLike)
+import           Control.Arrow       (first)
+import           Data.Function       (on)
+import           Data.List           (partition, maximumBy, intercalate)
+import qualified Data.Map.Strict     as M
+import           Data.Map.Strict     (Map)
+import           Data.Maybe          (isJust, fromJust, listToMaybe, catMaybes)
+import qualified Data.ListLike       as LL
+import           Data.ListLike       (ListLike)
+import           Lens.Micro.Platform (over, makeLenses, Lens')
 
 -- | A CompletionTree is a map of partial completions.
-newtype CompletionTree a = CompletionTree (Map a (CompletionTree a)) deriving (Monoid)
+newtype CompletionTree a = CompletionTree {_completionTree :: (Map a (CompletionTree a))}
+  deriving (Monoid)
+
+completionTree :: Lens' (CompletionTree a) (Map a (CompletionTree a))
+completionTree f ct = (\completionTree' -> ct {_completionTree = completionTree'}) <$>
+                        f (_completionTree ct)
 
 instance (Show a, ListLike a i) => Show (CompletionTree a) where
   show ct = "fromList " ++ show (toList ct)
@@ -56,13 +62,13 @@ stripPrefix a b
 fromList :: (Ord a, ListLike a i, Show a, Eq i) => [a] -> CompletionTree a
 fromList [] = mempty
 fromList (x:xs)
-  | x == mempty = (\(CompletionTree ct) -> CompletionTree (M.insert mempty mempty ct)) (fromList xs)
+  | x == mempty = over completionTree (M.insert mempty mempty) (fromList xs)
   | otherwise = case maximumBy' (compare `on` childrenIn xs) (tail $ LL.inits x) of
-      Nothing -> (\(CompletionTree ct) -> CompletionTree (M.insert x mempty ct)) (fromList xs)
+      Nothing -> over completionTree (M.insert x mempty) (fromList xs)
       Just parent -> case first (x:) $ partition (parent `LL.isPrefixOf`) xs of
-        ([_],rest) -> (\(CompletionTree ct) -> CompletionTree $ M.insert parent mempty ct) $ fromList rest
-        (hasParent, rest) -> (\(CompletionTree ct) -> CompletionTree (M.insert parent (fromList $
-           map (fromJust . stripPrefix parent) hasParent) ct)) $ fromList rest
+        ([_],rest) -> over completionTree (M.insert parent mempty) $ fromList rest
+        (hasParent, rest) -> over completionTree (M.insert parent (fromList $
+           map (fromJust . stripPrefix parent) hasParent)) $ fromList rest
       -- A parent is the prefix and the children are the items with the parent as prefix
       where childrenIn list parent = length $ filter (parent `LL.isPrefixOf`) list
 
@@ -147,7 +153,7 @@ toList (CompletionTree ct)
   | otherwise = concat $ M.elems $ M.mapWithKey (\k v -> map (k `LL.append`) $ toList v) ct
 
 -- | For debugging purposes.
--- 
+--
 -- Example:
 --
 -- >>> putStrLn $ pretty $ fromList ["put", "putStr", "putStrLn"]
