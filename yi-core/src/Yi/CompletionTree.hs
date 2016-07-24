@@ -2,6 +2,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 {- |
 Module      :  Yi.CompletionTree
@@ -23,6 +26,8 @@ module Yi.CompletionTree (
   fromList, toList,
   -- * Modification
   complete, update,
+  -- * Weighted
+  Weighted (Weighted), val, weight,
   -- * Debugging
   pretty,
   -- ** Lens
@@ -31,13 +36,13 @@ module Yi.CompletionTree (
 
 import           Control.Arrow       (first)
 import           Data.Function       (on)
-import           Data.List           (partition, maximumBy, intercalate)
+import           Data.List           (partition, maximumBy, intercalate, sort)
 import qualified Data.Map.Strict     as M
 import           Data.Map.Strict     (Map)
 import           Data.Maybe          (isJust, fromJust, listToMaybe, catMaybes)
 import qualified Data.ListLike       as LL
 import           Data.ListLike       (ListLike)
-import           Lens.Micro.Platform (over, Lens', _2, (.~), (&))
+import           Lens.Micro.Platform (over, Lens', _2, (.~), (&), _1)
 
 -- | A CompletionTree is a map of partial completions.
 --
@@ -59,14 +64,68 @@ import           Lens.Micro.Platform (over, Lens', _2, (.~), (&))
 -- (The empty strings are needed to denote the end of a word)
 -- (A CompletionTree is not limited to a binary tree)
 newtype CompletionTree a = CompletionTree {_unCompletionTree :: (Map a (CompletionTree a))}
-  deriving (Monoid, Eq)
+  deriving (Monoid, Eq, Show)
 
 unCompletionTree :: Lens' (CompletionTree a) (Map a (CompletionTree a))
 unCompletionTree f ct = (\unCompletionTree' -> ct {_unCompletionTree = unCompletionTree'}) <$>
                         f (_unCompletionTree ct)
 
+{- "Prettier" show
 instance (Ord a, Show a, ListLike a i) => Show (CompletionTree a) where
-  show ct = "fromList " ++ show (toList ct)
+  show ct = show $ ct ^. unCompletionTree --"fromList " ++ show (toList ct)
+-}
+
+data Weighted a = Weighted {_weight :: Double, _val :: a}
+  deriving (Show)
+
+{- "Prettier" show
+instance Show a => Show (Weighted a) where
+  show = show . view val
+-}
+
+weight :: Lens' (Weighted a) Double
+weight f w = (\weight' -> w {_weight = weight'}) <$> f (_weight w)
+
+val :: Lens' (Weighted a) a
+val f v = (\val' -> v {_val = val'}) <$> f (_val v)
+
+instance Monoid a => Monoid (Weighted a) where
+  mempty = Weighted 0 mempty
+  (Weighted a c) `mappend` (Weighted b d) = Weighted (max a b) (c `mappend` d)
+
+--instance Monoid a => Num (Weighted a) where
+--  (Weighted a c) + (Weighted b _) = Weighted (a + b) c
+--  (Weighted a c) * (Weighted b _) = Weighted (a * b) c
+--  abs = over weight abs
+--  signum = over weight signum
+--  fromInteger n = Weighted (fromInteger n) mempty
+--  negate = over weight negate
+
+instance Eq a => Eq (Weighted a) where
+  (Weighted _ a) == (Weighted _ b) = a == b
+
+instance Ord a => Ord (Weighted a) where
+  compare (Weighted a c) (Weighted b d) =
+    case compare b a of
+      EQ -> compare c d
+      x -> x
+
+instance ListLike a item => LL.FoldableLL (Weighted a) (Weighted item) where
+  foldl f a full =
+    case LL.uncons full of
+      Nothing -> a
+      Just (h,t) -> LL.foldl f (f a h) t
+  foldr f a = go
+    where
+      go full' = case LL.uncons full' of
+                   Nothing -> a
+                   Just (h,t) -> h `f` go t
+
+instance ListLike a item => ListLike (Weighted a) (Weighted item) where
+  singleton (Weighted n a) = Weighted n (LL.singleton a)
+  -- This can't be done with 'both' because 'Weighted n' /= 'Weighted n' because of polymorphism
+  uncons (Weighted n a) = over _1 (Weighted n) . over _2 (Weighted n) <$> LL.uncons a
+  null (Weighted _ a) = LL.null a
 
 -- | This function converts a list of completable elements to a CompletionTree
 -- It finds elements that share a common prefix and groups them.
@@ -75,7 +134,7 @@ instance (Ord a, Show a, ListLike a i) => Show (CompletionTree a) where
 fromList :: (Ord a, ListLike a i, Eq i) => [a] -> CompletionTree a
 fromList [] = mempty
 fromList (x:xs)
-  | x == mempty = over unCompletionTree (M.insert mempty mempty) (fromList xs)
+  | LL.null x = over unCompletionTree (M.insert x mempty) (fromList xs)
   | otherwise = case maximumBy' (compare `on` childrenIn xs) (tail $ LL.inits x) of
       Nothing -> over unCompletionTree (M.insert x mempty) (fromList xs)
       Just parent -> case first (x:) $ partition (parent `LL.isPrefixOf`) xs of
@@ -137,7 +196,7 @@ complete (CompletionTree ct)
 update :: (Ord a, ListLike a i, Eq i) => CompletionTree a -> a -> CompletionTree a
 update (CompletionTree ct) p
   -- p is empty, this case just doesn't make sense:
-  | mempty == p = error "Can't update a CompletionTree with a mempty"
+  | LL.null p = error "Can't update a CompletionTree with a mempty"
   -- p is a key in the map ct that doesn't have children:
   -- (This means the end of a word is reached)
   | isJust one && mempty == fromJust one = CompletionTree $ M.singleton mempty mempty
@@ -174,11 +233,11 @@ update (CompletionTree ct) p
 toList :: (Ord a, ListLike a i) => CompletionTree a -> [a]
 toList ct
   | mempty == ct = []
-  | otherwise = toList' ct
+  | otherwise = sort $ toList' ct
   where
-    toList' (CompletionTree ct)
-      | M.null ct = [mempty]
-      | otherwise = concat $ M.elems $ M.mapWithKey (\k v -> map (k `LL.append`) $ toList' v) ct
+    toList' (CompletionTree ct')
+      | M.null ct' = [mempty]
+      | otherwise = concat $ M.elems $ M.mapWithKey (\k v -> map (k `LL.append`) $ toList' v) ct'
 
 -- TODO: make this function display a tree and rename to showTree
 -- | For debugging purposes.
