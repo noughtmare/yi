@@ -136,3 +136,55 @@ library
       System.CanonicalizePath
       Yi.Buffer.Implementation
       Paths_yi_core
+
+test-suite tasty
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  hs-source-dirs:
+      tests
+  ghc-options: -Wall -ferror-spans
+  build-depends:
+      base >= 4.8
+    , array
+    , binary >= 0.7
+    , bytestring >= 0.9.1
+    , containers
+    , data-default
+    , directory
+    , dlist >= 0.4.1
+    , dynamic-state >= 0.1.0.5
+    , dyre >= 0.8.11
+    , exceptions
+    , filepath >= 1.1
+    , hashable >= 1.1.2.5
+    , Hclip >= 3
+    , ListLike >= 4.5
+    , microlens-platform
+    , mtl >= 0.1.0.1
+    , old-locale
+    , oo-prototypes
+    , parsec >= 3.0
+    , pointedlist >= 0.5
+    , process >= 1.0.1.1
+    , safe >= 0.3.4
+    , semigroups
+    , split >= 0.2
+    , text >= 1.1.1.3
+    , text-icu >= 0.7
+    , time >= 1.1
+    , transformers-base
+    , unix
+    , unix-compat >= 0.1
+    , unordered-containers >= 0.1.3
+    , word-trie >= 0.2.0.4
+    , xdg-basedir >= 0.2.1
+    , yi-language >= 0.1.1.0
+    , yi-rope >= 0.7.0.0
+    , tasty
+    , tasty-hspec
+    , tasty-smallcheck
+    , tasty-quickcheck
+    , yi-core
+    , text
+    , containers
+  default-language: Haskell2010

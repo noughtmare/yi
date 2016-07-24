@@ -119,3 +119,16 @@ library:
         - Yi.UI.Utils
         - Yi.Window
         - System.FriendlyPath
+
+tests:
+  tasty:
+    main: Spec.hs
+    source-dirs: tests
+    dependencies:
+      - tasty
+      - tasty-hspec
+      - tasty-smallcheck
+      - tasty-quickcheck
+      - yi-core
+      - text
+      - containers
