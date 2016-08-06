@@ -1,0 +1,12 @@
+## Customize dependencies
+dependencies:
+  override:
+    - sudo apt-get install libgconf2-dev libghc-gtk-dev 
+    - curl -sSL https://get.haskellstack.org/ | sh; stack setup
+  cache_directories:
+    - "~/.stack" # relative to the user's home directory
+
+## Customize test commands
+test:
+  override:
+    - stack test # Use stack for testing
