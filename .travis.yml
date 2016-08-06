@@ -5,25 +5,38 @@ cache:
   directories:
   - $HOME/.stack
 
-env:
-  - STACK_YAML=lts.yaml
-  - STACK_YAML=stack.yaml
+matrix:
+  include:
+  - env: GHCVER=7.10.3 STACK_YAML=lts.yaml
+    addons:
+      apt:
+        sources:
+        - hvr-ghc
+        packages:
+        - ghc-7.10.3
+  - env: GHCVER=8.0.1 STACK_YAML=stack.yaml
+    addons:
+      apt:
+        sources:
+        - hvr-ghc
+        packages:
+        - ghc-8.0.1
 
 addons:
   apt:
     packages:
     - libgconf2-dev
     - libgmp-dev
-    sources: hvr-ghc
 
 before_install:
- - mkdir -p $HOME/.local/bin
- - curl -L https://www.stackage.org/stack/linux-x86_64 | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
- - stack setup
-
-install:
- - stack install gtk2hs-buildtools
- - stack test -j2 --no-run-tests
+  # Download and unpack the stack executable
+  - mkdir -p ~/.local/bin
+  - export PATH=$HOME/.local/bin:$PATH
+  - travis_retry curl -L https://www.stackage.org/stack/linux-x86_64 | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
+  # ghc
+  - export PATH=/opt/ghc/$GHCVER/bin:$PATH
+  # gconf
+  - stack install gtk2hs-buildtools
 
 script:
- - stack test
+  - stack --no-terminal --skip-ghc-check test
