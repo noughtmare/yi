@@ -13,10 +13,10 @@ flags:
     description: Include the vty (CLI) frontend
     manual: True
     default: True
-  pango:
-    description: Include the pango (GUI) frontend
-    manual: True
-    default: True
+  # pango:
+  #   description: Include the pango (GUI) frontend
+  #   manual: True
+  #   default: True
   vim:
     description: Include the vim keymap
     manual: True
@@ -41,9 +41,9 @@ when:
   - condition: flag(vty)
     dependencies: yi-frontend-vty
     cpp-options: -DVTY
-  - condition: flag(pango)
-    dependencies: yi-frontend-pango
-    cpp-options: -DPANGO
+  # - condition: flag(pango)
+  #   dependencies: yi-frontend-pango
+  #   cpp-options: -DPANGO
   - condition: flag(vim)
     dependencies: yi-keymap-vim
     cpp-options: -DVIM

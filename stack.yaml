@@ -4,13 +4,14 @@ nix:
 packages:
 - yi-core
 - yi-frontend-vty
-- yi-frontend-pango
+#- yi-frontend-pango
 - yi-fuzzy-open
 - yi-keymap-cua
 - yi-keymap-emacs
 - yi-keymap-vim
 - yi-mode-haskell
 - yi-mode-javascript
+- yi-mode-brainfuck
 - yi-misc-modes
 - yi-ireader
 - yi-language
@@ -20,4 +21,4 @@ extra-deps:
 - Hclip-3.0.0.4
 - optparse-applicative-0.13.0.0
 - vty-5.13
-resolver: nightly-2016-10-21
+resolver: lts-7.12

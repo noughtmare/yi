@@ -1,0 +1,29 @@
+name: yi-mode-brainfuck
+version: 0.13.5
+synopsis: Yi editor brainfuck mode
+maintainer: Yi developers <yi-devel@googlegroups.com>
+license: GPL-2
+github: yi-editor/yi
+category: Yi
+
+ghc-options: -Wall -ferror-spans
+
+dependencies:
+    - base >= 4.8 && < 5
+    - yi-core
+    - yi-language
+    - vector
+    - microlens-platform
+    - text
+    - megaparsec
+
+library:
+    source-dirs: src
+    exposed-modules:
+      - Yi.Config.Default.BrainfuckMode
+      - Yi.Mode.Brainfuck
+#      - Yi.Syntax.Brainfuck
+#      - Yi.Verifier.Brainfuck
+#      - Yi.Lexer.Brainfuck
+include-dirs:
+    - src/Yi/Lexer
