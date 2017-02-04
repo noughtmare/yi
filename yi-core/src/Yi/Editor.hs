@@ -146,11 +146,6 @@ import           Yi.Types
 import           Yi.Utils
 import           Yi.Window
 
-assign :: MonadState s m => ASetter s s a b -> b -> m ()
-assign = (.=)
-
-uses l f = f <$> use l 
-
 instance Binary Editor where
   put (Editor bss bs supply ts dv _sl msh kr regex _dir _ev _cwa ) =
     let putNE (x :| xs) = put x >> put xs
@@ -451,7 +446,7 @@ setRegE s = killringA %= krSet s
 
 -- | Return the contents of the yank register
 getRegE :: EditorM R.YiString
-getRegE = uses killringA krGet
+getRegE = krGet <$> use killringA
 
 -- ---------------------------------------------------------------------
 -- | Dynamically-extensible state components.
@@ -465,11 +460,11 @@ getRegE = uses killringA krGet
 
 -- | Retrieve a value from the extensible state
 getEditorDyn :: (MonadEditor m, YiVariable a, Default a, Functor m) => m a
-getEditorDyn = fromMaybe def <$> getDyn (use dynamicA) (assign dynamicA)
+getEditorDyn = fromMaybe def <$> getDyn (use dynamicA) (dynamicA .=)
 
 -- | Insert a value into the extensible state, keyed by its type
 putEditorDyn :: (MonadEditor m, YiVariable a, Functor m) => a -> m ()
-putEditorDyn = putDyn (use dynamicA) (assign dynamicA)
+putEditorDyn = putDyn (use dynamicA) (dynamicA .=)
 
 -- | Like fnewE, create a new buffer filled with the String @s@,
 -- Switch the current window to this buffer. Doesn't associate any
@@ -621,7 +616,7 @@ focusWindowE k = do
     case foldl searchWindowSet  (False, 0, 0) ts of
         (False, _, _) -> fail $ "No window with key " ++ show k ++ "found. (focusWindowE)"
         (True, tabIndex, winIndex) -> do
-            assign tabsA (fromJust $ PL.moveTo tabIndex ts)
+            tabsA .= fromJust (PL.moveTo tabIndex ts)
             windowsA %= fromJust . PL.moveTo winIndex
 
 -- | Split the current window, opening a second window onto current buffer.
@@ -675,7 +670,7 @@ layoutManagerPreviousVariantE = do
 
 -- | Sets the given divider position on the current tab
 setDividerPosE :: DividerRef -> DividerPosition -> EditorM ()
-setDividerPosE ref = assign (currentTabA . tabDividerPositionA ref)
+setDividerPosE ref = ((currentTabA . tabDividerPositionA ref) .=)
 
 -- | Creates a new tab containing a window that views the current buffer.
 newTabE :: EditorM ()
@@ -697,12 +692,12 @@ previousTabE = tabsA %= PL.previous
 -- index is not specified.
 moveTabE :: Maybe Int -> EditorM ()
 moveTabE Nothing  = do
-    count <- uses tabsA PL.length
+    count <- PL.length <$> use tabsA
     tabsA %= fromJust . PL.moveTo (pred count)
 moveTabE (Just n) = do
-    newTabs <- uses tabsA (PL.moveTo n)
+    newTabs <- PL.moveTo n <$> use tabsA
     when (isNothing newTabs) failure
-    assign tabsA $ fromJust newTabs
+    tabsA .= fromJust newTabs
   where failure = fail $ "moveTab " ++ show n ++ ": no such tab"
 
 -- | Deletes the current tab. If there is only one tab open then error out.
@@ -719,8 +714,8 @@ deleteTabE = tabsA %= fromMaybe failure . deleteTab
 -- contains only one window then do nothing.
 tryCloseE :: EditorM ()
 tryCloseE = do
-    ntabs <- uses tabsA PL.length
-    nwins <- uses windowsA PL.length
+    ntabs <- PL.length <$> use tabsA
+    nwins <- PL.length <$> use windowsA
     unless (ntabs == 1 && nwins == 1) $ if nwins == 1
       -- Could the Maybe response from deleteLeft be used instead of the
       -- def 'if'?
@@ -734,7 +729,7 @@ closeOtherE = windowsA %= PL.deleteOthers
 -- | Switch focus to some other window. If none is available, create one.
 shiftOtherWindow :: MonadEditor m => m ()
 shiftOtherWindow = withEditor $ do
-  len <- uses windowsA PL.length
+  len <- PL.length <$> use windowsA
   if len == 1
     then splitE
     else nextWinE
@@ -783,7 +778,7 @@ addJumpAtE point = do
     m <- withCurrentBuffer setMarkHereB
     let bf = bufkey w
         j = Jump m bf
-    assign currentWindowA $ w & jumpListA %~ addJump j
+    currentWindowA .= (w & jumpListA %~ addJump j)
     return ()
 
 jumpBackE :: EditorM ()
