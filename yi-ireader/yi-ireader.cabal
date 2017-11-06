@@ -25,12 +25,7 @@ library
     , data-default
     , microlens-platform
     , text
-    , yi-core >= 0.17
-    , yi-language >= 0.17
-    , yi-rope >= 0.10
   exposed-modules:
       Yi.Mode.IReader
       Yi.IReader
-  other-modules:
-      Paths_yi_ireader
   default-language: Haskell2010

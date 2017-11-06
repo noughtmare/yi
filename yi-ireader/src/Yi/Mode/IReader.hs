@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_HADDOCK show-extensions #-}
 
 -- |
@@ -14,31 +15,48 @@
 
 module Yi.Mode.IReader where
 
-import Lens.Micro.Platform   ((%~))
+--import Lens.Micro.Platform   ((%~))
 import Data.Char      (intToDigit)
 import Data.Text      ()
-import Yi.Buffer.Misc
-import Yi.Editor      (printMsg, withCurrentBuffer)
+--import Yi.Buffer.Misc
+--import Yi.Editor      (printMsg, withCurrentBuffer)
 import Yi.IReader
-import Yi.Keymap      (YiM, topKeymapA)
-import Yi.Keymap.Keys (choice, important, metaCh, (?>>!))
-import Yi.Mode.Common (anyExtension, fundamentalMode)
+--import Yi.Keymap      (YiM, topKeymapA)
+--import Yi.Keymap.Keys (choice, important, metaCh, (?>>!))
+--import Yi.Mode.Common (anyExtension, fundamentalMode)
 
-abstract :: Mode syntax
-abstract = fundamentalMode { modeApplies = anyExtension ["irtxt"]
-                           , modeKeymap = topKeymapA %~ ikeys }
-  where
-    ikeys = important $ choice m
-    m = [ metaCh '`' ?>>! saveAsNewArticle
-        , metaCh '0' ?>>! deleteAndNextArticle
-        ]
-        ++ map (\x -> metaCh (intToDigit x) ?>>! saveAndNextArticle x) [1..9]
+class Yi m => YiMode m where
+  data Mode m
+  makeMode :: String -> [String] -> [(Char,m ())] -> Mode m
+  setCurrentBufferMode :: Mode m -> m ()
+  printMsg :: String -> m ()
 
-ireaderMode :: Mode syntax
-ireaderMode = abstract { modeName = "interactive reading of text" }
+ireaderMode :: YiMode m => Mode m
+ireaderMode = makeMode "interactive reading of text" ["irtxt"] $
+  [('`',saveAsNewArticle),('0',deleteAndNextArticle)]
+  ++ map (\x -> (intToDigit x, saveAndNextArticle x)) [1..9]
 
-ireadMode ::  YiM ()
+-- abstract :: Mode syntax
+-- abstract = fundamentalMode { modeApplies = anyExtension ["irtxt"]
+--                            , modeKeymap = topKeymapA %~ ikeys }
+--   where
+--     ikeys = important $ choice m
+--     m = [ metaCh '`' ?>>! saveAsNewArticle
+--         , metaCh '0' ?>>! deleteAndNextArticle
+--         ]
+--         ++ map (\x -> metaCh (intToDigit x) ?>>! saveAndNextArticle x) [1..9]
+
+-- ireaderMode :: Mode syntax
+-- ireaderMode = abstract { modeName = "interactive reading of text" }
+
+ireadMode :: YiMode m => m ()
 ireadMode = do
-  withCurrentBuffer $ setAnyMode $ AnyMode ireaderMode
+  setCurrentBufferMode $ ireaderMode
   nextArticle
   printMsg "M-` new; M-0 delete; M-[1-9]: save w/higher priority"
+
+-- ireadMode ::  YiM ()
+-- ireadMode = do
+--   withCurrentBuffer $ setAnyMode $ AnyMode ireaderMode
+--   nextArticle
+--   printMsg "M-` new; M-0 delete; M-[1-9]: save w/higher priority"

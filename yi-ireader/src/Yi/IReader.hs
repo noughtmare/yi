@@ -21,7 +21,7 @@
 module Yi.IReader where
 
 import           Control.Exception          (SomeException, catch)
-import           Control.Monad              (join, void)
+import           Control.Monad              (void)
 import           Data.Binary                (Binary, decode, encodeFile)
 import qualified Data.ByteString.Char8      as B (ByteString, pack, readFile, unpack)
 import qualified Data.ByteString.Lazy.Char8 as BL (fromChunks)
@@ -31,14 +31,28 @@ import           Data.Sequence              as S (Seq, ViewL (EmptyL, (:<)),
                                                   null, splitAt, viewl, viewr,
                                                   (<|), (><), (|>))
 import           Data.Typeable              (Typeable)
-import           Yi.Buffer.HighLevel        (replaceBufferContent, topB)
-import           Yi.Buffer.Misc             (elemsB, getBufferDyn, putBufferDyn)
-import           Yi.Editor                  (withCurrentBuffer)
-import           Yi.Keymap                  (YiM)
-import           Yi.Paths                   (getArticleDbFilename)
-import qualified Yi.Rope                    as R (fromString, toString)
-import           Yi.Types                   (YiVariable)
-import           Yi.Utils                   (io)
+
+class Monad m => Yi m where
+  getDB :: m ArticleDB
+  putDB :: ArticleDB -> m ()
+  getCurrentBufferContents :: m String
+  setCurrentBufferContents :: String -> m ()
+  io :: IO a -> m a
+  getArticleDbFilename :: m FilePath
+
+-- Reference implementation:
+--
+-- instance YiVariable ArticleDB
+--
+-- instance Yi YiM where
+--   getDB = withCurrentBuffer getBufferDyn
+--   putDB db = withCurrentBuffer $ putBufferDyn db
+--   getCurrentBufferContents = toString $ withCurrentBuffer elemsB
+--   setCurrentBufferContents str = do
+--     withCurrentBuffer $ replaceBufferContent $ fromString str
+--     topB -- replaceBufferContents moves us to bottom?
+--   io = io
+--   getArticleDbFilename = getConfigPath "articles.db"
 
 -- | TODO: Why 'B.ByteString'?
 type Article = B.ByteString
@@ -48,7 +62,6 @@ newtype ArticleDB = ADB { unADB :: Seq Article }
 
 instance Default ArticleDB where
     def = ADB S.empty
-instance YiVariable ArticleDB
 
 -- | Take an 'ArticleDB', and return the first 'Article' and an
 -- ArticleDB - *without* that article.
@@ -85,13 +98,15 @@ insertArticle :: ArticleDB -> Article -> ArticleDB
 insertArticle (ADB adb) new = ADB (new S.<| adb)
 
 -- | Serialize given 'ArticleDB' out.
-writeDB :: ArticleDB -> YiM ()
-writeDB adb = void $ io . join . fmap (`encodeFile` adb) $ getArticleDbFilename
+writeDB :: Yi m => ArticleDB -> m ()
+writeDB adb = do
+  file <- getArticleDbFilename
+  io $ void $ encodeFile file adb
 
 -- | Read in database from 'getArticleDbFilename' and then parse it
 -- into an 'ArticleDB'.
-readDB :: YiM ArticleDB
-readDB = io $ (getArticleDbFilename >>= r) `catch` returnDefault
+readDB :: Yi m => m ArticleDB
+readDB = getArticleDbFilename >>= \file -> io (r file `catch` returnDefault)
   where r = fmap (decode . BL.fromChunks . return) . B.readFile
         -- We read in with strict bytestrings to guarantee the file is
         -- closed, and then we convert it to the lazy bytestring
@@ -103,27 +118,25 @@ readDB = io $ (getArticleDbFilename >>= r) `catch` returnDefault
 -- Seq. So first we try the buffer state in the hope we can avoid a
 -- very expensive read from disk, and if we find nothing (that is, if
 -- we get an empty Seq), only then do we call 'readDB'.
-oldDbNewArticle :: YiM (ArticleDB, Article)
+oldDbNewArticle :: Yi m => m (ArticleDB, Article)
 oldDbNewArticle = do
-  saveddb <- withCurrentBuffer getBufferDyn
-  newarticle <- B.pack . R.toString <$> withCurrentBuffer elemsB
+  saveddb <- getDB
+  newarticle <- B.pack <$> getCurrentBufferContents
   if not $ S.null (unADB saveddb)
     then return (saveddb, newarticle)
     else readDB >>= \olddb -> return (olddb, newarticle)
 
 -- | Given an 'ArticleDB', dump the scheduled article into the buffer
 -- (replacing previous contents).
-setDisplayedArticle :: ArticleDB -> YiM ()
+setDisplayedArticle :: Yi m => ArticleDB -> m ()
 setDisplayedArticle newdb = do
   let next = getLatestArticle newdb
-  withCurrentBuffer $ do
-    replaceBufferContent $ R.fromString (B.unpack next)
-    topB -- replaceBufferContents moves us to bottom?
-    putBufferDyn newdb
+  setCurrentBufferContents $ B.unpack next
+  putDB newdb
 
 -- | Go to next one. This ignores the buffer, but it doesn't remove
 -- anything from the database. However, the ordering does change.
-nextArticle :: YiM ()
+nextArticle :: Yi m => m ()
 nextArticle = do
   (oldb,_) <- oldDbNewArticle
   -- Ignore buffer, just set the first article last
@@ -133,7 +146,7 @@ nextArticle = do
 
 -- | Delete current article (the article as in the database), and go
 -- to next one.
-deleteAndNextArticle :: YiM ()
+deleteAndNextArticle :: Yi m => m ()
 deleteAndNextArticle = do
   (oldb,_) <- oldDbNewArticle -- throw away changes
   let ndb = ADB $ case viewl (unADB oldb) of     -- drop 1st article
@@ -146,7 +159,7 @@ deleteAndNextArticle = do
 -- article from the buffer, then we call the function 'updateSetLast'
 -- which removes the first article and pushes our modified article to
 -- the end of the list.
-saveAndNextArticle :: Int -> YiM ()
+saveAndNextArticle :: Yi m => Int -> m ()
 saveAndNextArticle n = do
   (oldb,newa) <- oldDbNewArticle
   let newdb = shift n $ removeSetLast oldb newa
@@ -156,7 +169,7 @@ saveAndNextArticle n = do
 -- | Assume the buffer is an entirely new article just imported this
 -- second, and save it. We don't want to use 'updateSetLast' since
 -- that will erase an article.
-saveAsNewArticle :: YiM ()
+saveAsNewArticle :: Yi m => m ()
 saveAsNewArticle = do
   oldb <- readDB -- make sure we read from disk - we aren't in iread-mode!
   (_,newa) <- oldDbNewArticle -- we ignore the fst - the Default is 'empty'
